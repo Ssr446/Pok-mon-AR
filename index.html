@@ -11,9 +11,9 @@
     html, body { width:100%; height:100%; overflow:hidden; background:radial-gradient(ellipse at center,#1a1a2e 0%,#0a0a16 100%); font-family:'Nunito',sans-serif; }
 
     /* LAYERS */
-    #video-bg { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); z-index:0; display:none; }
+    #video-bg { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; display:none; }
     #three-c  { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; }
-    #debug-c  { position:fixed; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; opacity:0; transition:opacity .3s; transform:scaleX(-1); }
+    #debug-c  { position:fixed; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; opacity:0; transition:opacity .3s; }
     #debug-c.on { opacity:.85; }
     #flash    { position:fixed; inset:0; z-index:19; opacity:0; pointer-events:none; transition:opacity .08s ease-in; }
     #poke-label { position:fixed; display:none; transform:translate(-50%,-100%); background:rgba(0,0,0,.72); backdrop-filter:blur(8px); color:#fff; font-size:.85rem; font-weight:900; padding:4px 16px; border-radius:12px; border:1px solid rgba(255,255,255,.2); pointer-events:none; white-space:nowrap; z-index:12; }
@@ -232,6 +232,19 @@
     .dex-count { font-size:.78rem; font-weight:900; color:#FFD700; }
     #dex-empty { padding:40px 20px; text-align:center; color:rgba(255,255,255,.3); font-size:.85rem; line-height:1.6; }
     #dbghint { position:fixed; bottom:8px; right:14px; font-size:.62rem; color:rgba(255,255,255,.22); z-index:30; pointer-events:none; }
+
+    /* ── MOBILE RESPONSIVENESS ── */
+    @media (max-width: 650px) {
+      #badge { top: 62px; font-size: .7rem; padding: 6px 18px; width: 90%; text-align: center; white-space: normal; }
+      #twohand-hint { top: 104px; font-size: .65rem; padding: 5px 12px; width: 85%; text-align: center; white-space: normal; }
+      #catch-counter { top: 12px; left: 12px; padding: 5px 12px; }
+      #top-right { top: 12px; right: 12px; }
+      #card-inner { padding: 32px 24px; gap: 16px; }
+      #card-inner h1 { font-size: 2.2rem; }
+      #btn-ar { padding: 14px 40px; font-size: 1rem; }
+      #feat-row { gap: 6px; }
+      .feat-chip { font-size: .65rem; padding: 5px 10px; }
+    }
   </style>
 </head>
 <body>
@@ -1131,9 +1144,19 @@ btnAR.addEventListener('click',()=>{
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
     addLog('Camera API unavailable — using cursor fallback','err'); return;
   }
-  navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},audio:false})
+  // Prefer rear camera (environment) for phones, fallback to user (webcam)
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false})
   .then(stream=>{
     addLog('Camera access granted','ok');
+    
+    // Check if it's the front camera so we can mirror it
+    const track = stream.getVideoTracks()[0];
+    const settings = track.getSettings();
+    const isFront = settings.facingMode === 'user';
+    videoEl.style.transform = isFront ? 'scaleX(-1)' : 'scaleX(1)';
+    debugC.style.transform  = isFront ? 'scaleX(-1)' : 'scaleX(1)';
+    addLog('Using ' + (isFront ? 'Front' : 'Rear') + ' camera','ok');
+
     videoEl.srcObject=stream; videoEl.style.display='block';
     videoEl.addEventListener('loadeddata',()=>{
       addLog('Video active ('+videoEl.videoWidth+'×'+videoEl.videoHeight+')','ok');
