@@ -117,7 +117,7 @@
     .card-div { width:100%; height:1px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.1),transparent); animation:fadeUp .6s .3s both; }
 
     /* ── LAUNCH BUTTON ── */
-    #btn-ar {
+    #btn-ar, #btn-start-game {
       padding:16px 60px; font-size:1.05rem; font-weight:900; font-family:inherit;
       border:none; border-radius:50px; cursor:pointer; color:#fff;
       background:linear-gradient(135deg,#FF5555 0%,#CC0000 45%,#FF4444 100%);
@@ -130,9 +130,29 @@
       0%,100% { box-shadow:0 6px 32px rgba(200,0,0,.6),inset 0 1px 0 rgba(255,255,255,.22); background-position:0%; }
       50%      { box-shadow:0 8px 48px rgba(220,0,0,.85),0 0 0 8px rgba(200,0,0,.12),inset 0 1px 0 rgba(255,255,255,.22); background-position:100%; }
     }
-    #btn-ar:hover:not(:disabled) { transform:scale(1.05) translateY(-2px); }
-    #btn-ar:active:not(:disabled){ transform:scale(.97); }
+    #btn-ar:hover:not(:disabled), #btn-start-game:hover { transform:scale(1.05) translateY(-2px); }
+    #btn-ar:active:not(:disabled), #btn-start-game:active { transform:scale(.97); }
     #btn-ar:disabled { opacity:.45; cursor:default; animation:none; }
+
+    /* ── TUTORIAL CARD ── */
+    #tutorial-card {
+      display:none; flex-direction:column; align-items:center; gap:16px;
+      padding:40px 42px 36px; max-width:480px; width:92%;
+      border-radius:32px; position:relative; z-index:1;
+      background:rgba(4,4,20,.86); backdrop-filter:blur(32px);
+      animation:cardUp .4s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    #tutorial-card::before {
+      content:''; position:absolute; inset:-1.5px; border-radius:33px; z-index:-1;
+      background:conic-gradient(from var(--ba,0deg),#4FC3F7 0%,#CE93D8 25%,#FFD700 50%,#FF3B3B 75%,#4FC3F7 100%);
+      animation:spinBorder 7s linear infinite;
+    }
+    #tutorial-card::after { content:''; position:absolute; inset:1.5px; border-radius:31px; z-index:-1; background:rgba(4,4,20,.92); }
+    #tutorial-card h2 { font-size:1.8rem; color:#fff; font-weight:900; margin-bottom:8px; text-shadow:0 0 12px rgba(255,255,255,.3); }
+    .tut-step { display:flex; align-items:center; gap:18px; width:100%; text-align:left; background:rgba(255,255,255,.04); padding:16px; border-radius:18px; border:1px solid rgba(255,255,255,.08); }
+    .tut-icon { font-size:1.8rem; flex-shrink:0; background:rgba(255,255,255,.06); width:52px; height:52px; display:flex; align-items:center; justify-content:center; border-radius:14px; box-shadow:inset 0 1px 0 rgba(255,255,255,.1); }
+    .tut-text { font-size:.82rem; color:rgba(255,255,255,.65); line-height:1.45; }
+    .tut-text strong { color:#fff; font-size:.95rem; letter-spacing:.5px; }
 
     /* ── LOG BOX ── */
     #log-box { width:100%; font-size:.73rem; line-height:1.65; color:rgba(255,255,255,.45); text-align:left; max-height:78px; overflow-y:auto; min-height:1.2em; animation:fadeUp .6s .5s both; }
@@ -241,9 +261,12 @@
       #top-right { top: 12px; right: 12px; }
       #card-inner { padding: 32px 24px; gap: 16px; }
       #card-inner h1 { font-size: 2.2rem; }
-      #btn-ar { padding: 14px 40px; font-size: 1rem; }
+      #btn-ar, #btn-start-game { padding: 14px 40px; font-size: 1rem; }
       #feat-row { gap: 6px; }
       .feat-chip { font-size: .65rem; padding: 5px 10px; }
+      #tutorial-card { padding: 32px 20px; }
+      .tut-step { padding: 12px; gap: 12px; }
+      .tut-icon { width: 44px; height: 44px; font-size: 1.5rem; }
     }
   </style>
 </head>
@@ -291,6 +314,28 @@
     <button id="btn-ar">Launch AR Session</button>
     <div id="log-box"></div>
 
+  </div>
+
+  <!-- TUTORIAL CARD (Shown after clicking Launch) -->
+  <div id="tutorial-card">
+    <h2>How to Play</h2>
+    
+    <div class="tut-step">
+      <div class="tut-icon">🖐️</div>
+      <div class="tut-text"><strong>Keep Hand Visible</strong><br>Point the camera at your physical hand.</div>
+    </div>
+    
+    <div class="tut-step">
+      <div class="tut-icon">🤏</div>
+      <div class="tut-text"><strong>Pinch to Grab</strong><br>Pinch your index and thumb to grab the ball. Release to throw!</div>
+    </div>
+
+    <div class="tut-step">
+      <div class="tut-icon">👐</div>
+      <div class="tut-text"><strong>Two-Hand Control</strong><br>Bring in a 2nd hand while holding to Power Charge. Bring in a 2nd hand after catching to Scale & Rotate!</div>
+    </div>
+
+    <button id="btn-start-game">Got it, let's go!</button>
   </div>
 </div>
 
@@ -446,6 +491,8 @@ const pokeRarEl   = document.getElementById('poke-rarity');
 const pokeCpEl    = document.getElementById('poke-cp');
 const hintEl      = document.getElementById('hint');
 const btnAR       = document.getElementById('btn-ar');
+const btnStartGame= document.getElementById('btn-start-game');
+const tutorialCard= document.getElementById('tutorial-card');
 const btnDex      = document.getElementById('btn-dex');
 const dexPanel    = document.getElementById('dex-panel');
 const dexClose    = document.getElementById('dex-close');
@@ -1136,9 +1183,17 @@ function renderDex() {
 
 /* ── BUTTON HANDLERS ─────────────────────────────────────────────────── */
 btnAR.addEventListener('click',()=>{
-  btnAR.disabled=true; btnAR.textContent='Starting…';
+  document.getElementById('card-inner').style.display='none';
+  tutorialCard.style.display='flex';
+});
+
+btnStartGame.addEventListener('click', ()=>{
+  btnStartGame.disabled=true; btnStartGame.textContent='Starting Camera…';
   enableMouseFallback();
-  gameActive=true; cardEl.style.display='none'; hud.style.display='block';
+  gameActive=true; 
+  cardEl.style.display='none'; 
+  document.getElementById('bg-canvas').style.display='none';
+  hud.style.display='block';
   modePill.textContent='Cursor Fallback'; setState(ST.IDLE);
 
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
