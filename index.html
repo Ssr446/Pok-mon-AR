@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pokémon AR — Catch 'Em All</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;900&display=swap');
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+    html, body { width:100%; height:100%; overflow:hidden; background:radial-gradient(ellipse at center,#1a1a2e 0%,#0a0a16 100%); font-family:'Nunito',sans-serif; }
+
+    /* LAYERS */
+    #video-bg { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); z-index:0; display:none; }
+    #three-c  { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; }
+    #debug-c  { position:fixed; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; opacity:0; transition:opacity .3s; transform:scaleX(-1); }
+    #debug-c.on { opacity:.85; }
+    #flash    { position:fixed; inset:0; z-index:19; opacity:0; pointer-events:none; transition:opacity .08s ease-in; }
+    #poke-label { position:fixed; display:none; transform:translate(-50%,-100%); background:rgba(0,0,0,.72); backdrop-filter:blur(8px); color:#fff; font-size:.85rem; font-weight:900; padding:4px 16px; border-radius:12px; border:1px solid rgba(255,255,255,.2); pointer-events:none; white-space:nowrap; z-index:12; }
+    #cursor-ring { display:none; position:fixed; width:28px; height:28px; border-radius:50%; border:2.5px solid rgba(255,255,255,.7); pointer-events:none; transform:translate(-50%,-50%); z-index:13; transition:width .1s,height .1s,border-color .1s,background .1s; }
+    #cursor-ring.hold { width:14px; height:14px; border-color:#FFD700; background:rgba(255,215,0,.3); }
+
+    /* ── BACKGROUND CANVAS ───────────────────────────────────────────── */
+    #bg-canvas { position:fixed; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+
+    /* ── START CARD ─────────────────────────────────────────────────── */
+    #card {
+      position:fixed; inset:0; z-index:20;
+      display:flex; align-items:center; justify-content:center;
+    }
+    /* Animated aurora blobs behind card */
+    #card::before, #card::after {
+      content:''; position:fixed; border-radius:50%; filter:blur(80px); pointer-events:none;
+      animation:blobDrift 9s ease-in-out infinite alternate;
+    }
+    #card::before { width:500px; height:500px; top:-100px; left:-150px; background:radial-gradient(circle,rgba(140,30,200,.22),transparent 70%); animation-duration:11s; }
+    #card::after  { width:400px; height:400px; bottom:-80px; right:-100px; background:radial-gradient(circle,rgba(200,30,30,.2),transparent 70%); animation-duration:8s; animation-direction:alternate-reverse; }
+    @keyframes blobDrift { 0%{transform:translate(0,0) scale(1)} 100%{transform:translate(40px,30px) scale(1.12)} }
+
+    #card-inner {
+      display:flex; flex-direction:column; align-items:center; gap:24px;
+      padding:48px 52px 42px; max-width:440px; width:92%;
+      border-radius:32px; position:relative; z-index:1;
+      background:rgba(4,4,20,.86); backdrop-filter:blur(32px);
+      animation:cardUp .75s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    @keyframes cardUp { from{opacity:0;transform:translateY(32px) scale(.96)} to{opacity:1;transform:translateY(0) scale(1)} }
+    /* Rotating gradient border via pseudo-element */
+    #card-inner::before {
+      content:''; position:absolute; inset:-1.5px; border-radius:33px; z-index:-1;
+      background:conic-gradient(from var(--ba,0deg),#FF3B3B 0%,#FFD700 25%,#9B59B6 50%,#4FC3F7 75%,#FF3B3B 100%);
+      animation:spinBorder 7s linear infinite;
+    }
+    @keyframes spinBorder {
+      0%  { --ba:0deg   }
+      100%{ --ba:360deg }
+    }
+    @property --ba { syntax:'<angle>'; initial-value:0deg; inherits:false; }
+    /* Inner cover to knock out most of the conic, leaving just a thin rim */
+    #card-inner::after {
+      content:''; position:absolute; inset:1.5px; border-radius:31px; z-index:-1;
+      background:rgba(4,4,20,.92);
+    }
+
+    /* ── HERO POKÉBALL ── */
+    #hero-ball {
+      width:96px; height:96px; border-radius:50%; position:relative; overflow:hidden; flex-shrink:0;
+      box-shadow:0 0 0 3px #111, 0 0 40px rgba(255,60,60,.55), 0 0 90px rgba(255,60,60,.22), 0 22px 28px rgba(0,0,0,.5);
+      animation:ballFloat 3.4s ease-in-out infinite;
+    }
+    @keyframes ballFloat {
+      0%,100% { transform:translateY(0); box-shadow:0 0 0 3px #111, 0 0 40px rgba(255,60,60,.55), 0 22px 28px rgba(0,0,0,.5); }
+      50%      { transform:translateY(-11px); box-shadow:0 0 0 3px #111, 0 0 65px rgba(255,80,80,.8), 0 38px 40px rgba(0,0,0,.3); }
+    }
+    .bh-top    { position:absolute; top:0; left:0; right:0; height:50%; background:linear-gradient(150deg,#FF5555 0%,#CC0000 55%,#880000 100%); }
+    .bh-bottom { position:absolute; bottom:0; left:0; right:0; height:50%; background:linear-gradient(330deg,#fff 0%,#ddd 100%); }
+    .bh-belt   { position:absolute; top:calc(50% - 4.5px); left:0; right:0; height:9px; background:#0d0d0d; z-index:2; }
+    .bh-ring   { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:28px; height:28px; border-radius:50%; background:#111; z-index:3; }
+    .bh-btn    {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:18px; height:18px; border-radius:50%; z-index:4;
+      background:radial-gradient(circle at 35% 35%, #fff 0%, #ccc 100%);
+      box-shadow:0 0 8px rgba(255,255,255,.9), 0 0 20px rgba(255,255,255,.4);
+      animation:btnPing 3.4s ease-in-out infinite;
+    }
+    @keyframes btnPing { 0%,100%{box-shadow:0 0 8px rgba(255,255,255,.9),0 0 20px rgba(255,255,255,.4)} 50%{box-shadow:0 0 14px #fff,0 0 36px rgba(255,255,255,.7)} }
+    .bh-sheen  { position:absolute; top:4px; left:10px; width:28px; height:14px; border-radius:50%; background:rgba(255,255,255,.15); transform:rotate(-20deg); z-index:5; pointer-events:none; }
+
+    /* ── TITLE ── */
+    #title-wrap { display:flex; flex-direction:column; align-items:center; gap:5px; animation:fadeUp .6s .1s both; }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+    #card-inner h1 {
+      font-size:clamp(2rem,5.5vw,3rem); font-weight:900; letter-spacing:-1.5px;
+      background:linear-gradient(110deg,#fff 20%,#FFD700 50%,#fff 80%);
+      background-size:200%; -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text; animation:shimmer 3.5s ease infinite;
+    }
+    @keyframes shimmer { 0%{background-position:0%} 50%{background-position:100%} 100%{background-position:0%} }
+    .card-subtitle { font-size:.72rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,.35); }
+
+    /* ── FEATURE CHIPS ── */
+    #feat-row { display:flex; gap:9px; flex-wrap:wrap; justify-content:center; animation:fadeUp .6s .2s both; }
+    .feat-chip {
+      display:flex; align-items:center; gap:7px; padding:7px 15px; border-radius:22px;
+      background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1);
+      font-size:.72rem; font-weight:700; color:rgba(255,255,255,.72);
+      transition:background .2s, border-color .2s;
+    }
+    .feat-chip:hover { background:rgba(255,255,255,.09); border-color:rgba(255,255,255,.22); }
+    .feat-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .fd-hand    { background:#4FC3F7; box-shadow:0 0 7px #4FC3F7; }
+    .fd-twohand { background:#CE93D8; box-shadow:0 0 7px #CE93D8; }
+    .fd-shiny   { background:#FFD700; box-shadow:0 0 7px #FFD700; }
+    .fd-rare    { background:#FF8C42; box-shadow:0 0 7px #FF8C42; }
+
+    /* ── DIVIDER ── */
+    .card-div { width:100%; height:1px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.1),transparent); animation:fadeUp .6s .3s both; }
+
+    /* ── LAUNCH BUTTON ── */
+    #btn-ar {
+      padding:16px 60px; font-size:1.05rem; font-weight:900; font-family:inherit;
+      border:none; border-radius:50px; cursor:pointer; color:#fff;
+      background:linear-gradient(135deg,#FF5555 0%,#CC0000 45%,#FF4444 100%);
+      background-size:200%;
+      box-shadow:0 6px 32px rgba(200,0,0,.6), inset 0 1px 0 rgba(255,255,255,.22);
+      animation:btnGlow 2.6s ease-in-out infinite, fadeUp .6s .4s both;
+      transition:transform .15s, box-shadow .2s;
+    }
+    @keyframes btnGlow {
+      0%,100% { box-shadow:0 6px 32px rgba(200,0,0,.6),inset 0 1px 0 rgba(255,255,255,.22); background-position:0%; }
+      50%      { box-shadow:0 8px 48px rgba(220,0,0,.85),0 0 0 8px rgba(200,0,0,.12),inset 0 1px 0 rgba(255,255,255,.22); background-position:100%; }
+    }
+    #btn-ar:hover:not(:disabled) { transform:scale(1.05) translateY(-2px); }
+    #btn-ar:active:not(:disabled){ transform:scale(.97); }
+    #btn-ar:disabled { opacity:.45; cursor:default; animation:none; }
+
+    /* ── LOG BOX ── */
+    #log-box { width:100%; font-size:.73rem; line-height:1.65; color:rgba(255,255,255,.45); text-align:left; max-height:78px; overflow-y:auto; min-height:1.2em; animation:fadeUp .6s .5s both; }
+    #log-box .ok  { color:#69ff9a; }
+    #log-box .err { color:#ff6b6b; }
+
+    /* HUD */
+    #hud { display:none; position:fixed; inset:0; pointer-events:none; z-index:10; }
+
+    /* Top centre — state badge */
+    #badge {
+      position:absolute; top:18px; left:50%; transform:translateX(-50%);
+      padding:7px 24px; border-radius:28px; font-size:.82rem; font-weight:700;
+      letter-spacing:1.4px; text-transform:uppercase;
+      backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.52); color:#fff; white-space:nowrap; transition:background .3s;
+    }
+    #badge.hold   { background:rgba(180,30,30,.82); }
+    #badge.thrown { background:rgba(255,140,0,.82); }
+    #badge.caught { background:rgba(40,180,80,.88); }
+
+    /* Top left */
+    #catch-counter { position:absolute; top:18px; left:18px; padding:6px 16px; border-radius:20px; font-size:.78rem; font-weight:900; letter-spacing:1px; text-transform:uppercase; backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.14); background:rgba(0,0,0,.55); color:rgba(255,255,255,.85); }
+    #catch-counter span { color:#FFD700; font-size:1rem; }
+
+    /* Top right stack */
+    #top-right { position:absolute; top:18px; right:18px; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+    .pill { padding:5px 14px; border-radius:20px; font-size:.68rem; font-weight:700; letter-spacing:1px; text-transform:uppercase; backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.55); color:rgba(255,255,255,.65); transition:background .4s,color .4s; }
+    .pill.active { background:rgba(40,180,80,.72); color:#fff; }
+    #ball-pill.pokeball  { border-color:rgba(200,50,50,.5); }
+    #ball-pill.greatball { border-color:rgba(50,100,200,.6); color:#8ab8ff; }
+    #ball-pill.ultraball { border-color:rgba(230,180,0,.6); color:#ffd700; }
+
+    /* ── BOTTOM AREA ── */
+    /* Instruction hint — visible by default, hidden when info-card is up */
+    #hint {
+      position:absolute; bottom:22px; left:50%; transform:translateX(-50%);
+      padding:8px 20px; border-radius:16px; font-size:.76rem; font-weight:700;
+      color:rgba(255,255,255,.88); background:rgba(0,0,0,.52);
+      backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.1); white-space:nowrap;
+      transition:opacity .25s;
+    }
+    #hud.info-up #hint { opacity:0; pointer-events:none; }
+
+    /* Info card — slides up from bottom when Pokémon appears */
+    #info-card {
+      position:absolute; bottom:22px; left:50%; transform:translateX(-50%) translateY(120px);
+      opacity:0; transition:transform .42s cubic-bezier(.34,1.56,.64,1),opacity .3s;
+      min-width:260px; max-width:360px; width:80%;
+      background:rgba(0,0,0,.74); backdrop-filter:blur(16px);
+      border:1px solid rgba(255,255,255,.14); border-radius:18px; padding:14px 20px;
+      display:flex; flex-direction:column; gap:8px;
+    }
+    #info-card.show { transform:translateX(-50%) translateY(0); opacity:1; }
+    #poke-name-row { display:flex; align-items:center; gap:10px; }
+    #poke-name   { font-size:1.35rem; font-weight:900; color:#fff; }
+    #poke-shiny  { font-size:.65rem; font-weight:900; letter-spacing:1.5px; padding:2px 8px; border-radius:10px; background:linear-gradient(90deg,#ffd700,#ff8c00); color:#000; display:none; }
+    #poke-meta   { display:flex; gap:8px; align-items:center; }
+    #poke-type   { font-size:.7rem; font-weight:700; padding:3px 10px; border-radius:12px; }
+    #poke-rarity { font-size:.68rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; }
+    #poke-cp     { font-size:.7rem; color:rgba(255,255,255,.65); margin-left:auto; }
+
+    /* Power charge bar — shown when 2nd hand detected in HOLD state */
+    #power-wrap {
+      position:absolute; bottom:92px; left:50%; transform:translateX(-50%);
+      width:200px; display:none; flex-direction:column; align-items:center; gap:5px;
+    }
+    #power-wrap.active { display:flex; }
+    #power-label { font-size:.62rem; font-weight:900; letter-spacing:2px; color:rgba(255,255,255,.7); text-transform:uppercase; }
+    #power-track { width:100%; height:8px; background:rgba(255,255,255,.1); border-radius:4px; overflow:hidden; border:1px solid rgba(255,255,255,.15); }
+    #power-bar { height:100%; width:0%; border-radius:4px; transition:width .05s linear; background:linear-gradient(90deg,#44ff88,#ffd700,#ff4444); box-shadow:0 0 8px rgba(100,255,120,.5); }
+
+    /* Two-hand inspection hint (shown in SPAWN when 2 hands detected) */
+    #twohand-hint {
+      position:absolute; top:72px; left:50%; transform:translateX(-50%);
+      padding:5px 18px; border-radius:14px; font-size:.7rem; font-weight:700;
+      color:rgba(255,255,255,.75); background:rgba(80,60,200,.35);
+      backdrop-filter:blur(8px); border:1px solid rgba(150,130,255,.3);
+      white-space:nowrap; display:none;
+    }
+    #twohand-hint.show { display:block; }
+
+    /* Pokédex */
+    #btn-dex { position:absolute; bottom:22px; right:18px; padding:8px 18px; font-size:.72rem; font-weight:900; letter-spacing:1.5px; border:1px solid rgba(255,255,255,.2); border-radius:20px; background:rgba(0,0,0,.5); backdrop-filter:blur(8px); color:rgba(255,255,255,.8); cursor:pointer; transition:background .2s; text-transform:uppercase; pointer-events:all; }
+    #btn-dex:hover { background:rgba(255,255,255,.1); color:#fff; }
+    #dex-panel { position:fixed; top:0; right:-300px; width:280px; height:100%; background:rgba(5,5,20,.92); backdrop-filter:blur(20px); border-left:1px solid rgba(255,255,255,.14); z-index:25; transition:right .35s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; overflow:hidden; pointer-events:all; }
+    #dex-panel.open { right:0; }
+    #dex-header { padding:22px 20px 16px; border-bottom:1px solid rgba(255,255,255,.1); display:flex; justify-content:space-between; align-items:center; }
+    #dex-header h2 { font-size:1rem; font-weight:900; letter-spacing:2px; color:#FFD700; }
+    #dex-close { background:none; border:none; color:rgba(255,255,255,.5); font-size:1.4rem; cursor:pointer; }
+    #dex-close:hover { color:#fff; }
+    #dex-list { flex:1; overflow-y:auto; padding:12px 0; }
+    .dex-item { display:flex; align-items:center; padding:10px 20px; border-bottom:1px solid rgba(255,255,255,.05); gap:10px; }
+    .dex-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .dex-name { flex:1; font-size:.88rem; font-weight:700; color:#fff; }
+    .dex-type { font-size:.65rem; font-weight:700; padding:2px 8px; border-radius:10px; }
+    .dex-count { font-size:.78rem; font-weight:900; color:#FFD700; }
+    #dex-empty { padding:40px 20px; text-align:center; color:rgba(255,255,255,.3); font-size:.85rem; line-height:1.6; }
+    #dbghint { position:fixed; bottom:8px; right:14px; font-size:.62rem; color:rgba(255,255,255,.22); z-index:30; pointer-events:none; }
+  </style>
+</head>
+<body>
+
+<video id="video-bg" autoplay muted playsinline></video>
+<canvas id="three-c"></canvas>
+<canvas id="debug-c"></canvas>
+<div id="flash"></div>
+<div id="poke-label"></div>
+<div id="cursor-ring"></div>
+
+<canvas id="bg-canvas"></canvas>
+
+<!-- START CARD -->
+<div id="card">
+  <div id="card-inner">
+
+    <!-- Animated CSS Pokéball hero -->
+    <div id="hero-ball">
+      <div class="bh-top"></div>
+      <div class="bh-bottom"></div>
+      <div class="bh-belt"></div>
+      <div class="bh-ring"></div>
+      <div class="bh-btn"></div>
+      <div class="bh-sheen"></div>
+    </div>
+
+    <!-- Title -->
+    <div id="title-wrap">
+      <h1>Pokémon AR</h1>
+      <p class="card-subtitle">Real-world hand tracking &middot; Catch them live</p>
+    </div>
+
+    <!-- Feature chips -->
+    <div id="feat-row">
+      <div class="feat-chip"><div class="feat-dot fd-hand"></div>Hand Tracking</div>
+      <div class="feat-chip"><div class="feat-dot fd-twohand"></div>Two-Hand Control</div>
+      <div class="feat-chip"><div class="feat-dot fd-shiny"></div>Shiny System</div>
+      <div class="feat-chip"><div class="feat-dot fd-rare"></div>8 Pokémon</div>
+    </div>
+
+    <div class="card-div"></div>
+
+    <button id="btn-ar">Launch AR Session</button>
+    <div id="log-box"></div>
+
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="badge">Extend your hand to begin</div>
+
+  <div id="catch-counter">CAUGHT <span id="catch-num">0</span></div>
+
+  <div id="top-right">
+    <div class="pill" id="mode-pill">Initialising</div>
+    <div class="pill pokeball" id="ball-pill">Poke Ball</div>
+  </div>
+
+  <div id="twohand-hint">Both hands detected — spread to scale, tilt to rotate</div>
+
+  <div id="power-wrap">
+    <div id="power-label">Power Charge</div>
+    <div id="power-track"><div id="power-bar"></div></div>
+  </div>
+
+  <div id="info-card">
+    <div id="poke-name-row">
+      <div id="poke-name">—</div>
+      <div id="poke-shiny">SHINY</div>
+    </div>
+    <div id="poke-meta">
+      <div id="poke-type">Normal</div>
+      <div id="poke-rarity">Common</div>
+      <div id="poke-cp">CP —</div>
+    </div>
+  </div>
+
+  <div id="hint">Pinch to grip the ball · Open hand to throw</div>
+  <button id="btn-dex">Pokédex</button>
+</div>
+
+<!-- Pokédex side panel -->
+<div id="dex-panel">
+  <div id="dex-header">
+    <h2>POKÉDEX</h2>
+    <button id="dex-close">✕</button>
+  </div>
+  <div id="dex-list">
+    <div id="dex-empty">No Pokémon caught yet.<br>Throw the ball to start!</div>
+  </div>
+</div>
+
+<div id="dbghint">D = debug skeleton</div>
+
+<script>
+/* ── BACKGROUND PARTICLE SYSTEM ── */
+(function(){
+  const cvs = document.getElementById('bg-canvas');
+  const ctx = cvs.getContext('2d');
+  let w, h;
+  function resize(){ w = cvs.width = window.innerWidth; h = cvs.height = window.innerHeight; }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const particles = [];
+  const colors = ['#4FC3F7', '#CE93D8', '#FFD700', '#FF8C42', '#FF3B3B'];
+
+  for(let i=0; i<35; i++){
+    particles.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4 - 0.2, // slight upward bias
+      r: Math.random() * 3 + 1,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      alpha: Math.random() * 0.5 + 0.1,
+      isRing: Math.random() > 0.8,
+      pulseSpeed: Math.random() * 0.02 + 0.005,
+      pulsePhase: Math.random() * Math.PI * 2
+    });
+  }
+
+  function anim(){
+    requestAnimationFrame(anim);
+    // Don't draw if card is hidden (game running)
+    if(cardEl && cardEl.style.display === 'none') return;
+
+    ctx.clearRect(0,0,w,h);
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+
+      if(p.x < -20) p.x = w + 20;
+      if(p.x > w + 20) p.x = -20;
+      if(p.y < -20) p.y = h + 20;
+      if(p.y > h + 20) p.y = -20;
+
+      p.pulsePhase += p.pulseSpeed;
+      const currentAlpha = p.alpha + Math.sin(p.pulsePhase) * 0.15;
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      
+      if(p.isRing){
+        ctx.strokeStyle = p.color;
+        ctx.globalAlpha = Math.max(0, currentAlpha);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, currentAlpha);
+        ctx.fill();
+        // Glow
+        ctx.globalAlpha = Math.max(0, currentAlpha * 0.4);
+        ctx.arc(p.x, p.y, p.r * 3, 0, Math.PI*2);
+        ctx.fill();
+      }
+    });
+    ctx.globalAlpha = 1.0;
+  }
+  // Short delay to let DOM elements attach before anim loop checks cardEl
+  setTimeout(anim, 100);
+})();
+</script>
+<script src="/three.min.js"></script>
+<script>
+'use strict';
+
+/* ── SAFETY ─────────────────────────────────────────────────────────── */
+if (typeof THREE === 'undefined') {
+  document.getElementById('log-box').innerHTML = '<span class="err">three.min.js not found — ensure the file exists in the project folder.</span>';
+  document.getElementById('btn-ar').disabled = true;
+  throw new Error('THREE not loaded');
+}
+
+/* ── DOM ─────────────────────────────────────────────────────────────── */
+const videoEl     = document.getElementById('video-bg');
+const threeC      = document.getElementById('three-c');
+const debugC      = document.getElementById('debug-c');
+const flashEl     = document.getElementById('flash');
+const pokeLabel   = document.getElementById('poke-label');
+const cursorRing  = document.getElementById('cursor-ring');
+const cardEl      = document.getElementById('card');
+const hud         = document.getElementById('hud');
+const badge       = document.getElementById('badge');
+const catchNumEl  = document.getElementById('catch-num');
+const modePill    = document.getElementById('mode-pill');
+const ballPill    = document.getElementById('ball-pill');
+const twohandHint = document.getElementById('twohand-hint');
+const powerWrap   = document.getElementById('power-wrap');
+const powerBar    = document.getElementById('power-bar');
+const infoCard    = document.getElementById('info-card');
+const pokeNameEl  = document.getElementById('poke-name');
+const pokeShinyEl = document.getElementById('poke-shiny');
+const pokeTypeEl  = document.getElementById('poke-type');
+const pokeRarEl   = document.getElementById('poke-rarity');
+const pokeCpEl    = document.getElementById('poke-cp');
+const hintEl      = document.getElementById('hint');
+const btnAR       = document.getElementById('btn-ar');
+const btnDex      = document.getElementById('btn-dex');
+const dexPanel    = document.getElementById('dex-panel');
+const dexClose    = document.getElementById('dex-close');
+const dexList     = document.getElementById('dex-list');
+const logBox      = document.getElementById('log-box');
+
+function addLog(msg, cls) {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = (cls==='ok'?'+ ':cls==='err'?'- ':'· ') + msg;
+  logBox.appendChild(d); logBox.scrollTop = logBox.scrollHeight;
+}
+
+/* ── THREE.JS SCENE ─────────────────────────────────────────────────── */
+const renderer = new THREE.WebGLRenderer({ canvas:threeC, alpha:true, antialias:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 100);
+camera.position.set(0, 0, 5);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(3,6,5); scene.add(sun);
+const rim = new THREE.DirectionalLight(0x8888ff, 0.4); rim.position.set(-4,2,-3); scene.add(rim);
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  debugC.width=window.innerWidth; debugC.height=window.innerHeight;
+});
+
+/* ── 3-D HELPERS ────────────────────────────────────────────────────── */
+const M = THREE.MathUtils;
+function mat(col,shine,emis,emisI) { return new THREE.MeshPhongMaterial({color:col,shininess:shine||40,emissive:emis||0,emissiveIntensity:emisI||0}); }
+function sphere(r,s) { return new THREE.SphereGeometry(r,s||18,s||18); }
+function cyl(r1,r2,h,s) { return new THREE.CylinderGeometry(r1,r2,h,s||10); }
+function cone(r,h,s) { return new THREE.ConeGeometry(r,h,s||8); }
+function box(w,h,d)  { return new THREE.BoxGeometry(w,h,d); }
+function mk(geo,m)   { return new THREE.Mesh(geo,m); }
+
+/* ── BALL ───────────────────────────────────────────────────────────── */
+const BALL_CFG = {
+  pokeball:  { label:'Poke Ball',  top:0xDD1111, belt:0x111111, cls:'pokeball'  },
+  greatball: { label:'Great Ball', top:0x1144CC, belt:0xFF2222, cls:'greatball' },
+  ultraball: { label:'Ultra Ball', top:0x111111, belt:0xFFCC00, cls:'ultraball' },
+};
+let ballTopMat, ballBeltMat;
+
+function buildPokeball() {
+  const g=new THREE.Group(), r=0.28;
+  ballTopMat  = mat(0xDD1111,90,0,0); ballTopMat.specular=new THREE.Color(0xffffff);
+  const btmMat= mat(0xffffff,80);
+  ballBeltMat = mat(0x111111);
+  g.add(mk(new THREE.SphereGeometry(r,32,16,0,Math.PI*2,0,Math.PI/2), ballTopMat));
+  g.add(mk(new THREE.SphereGeometry(r,32,16,0,Math.PI*2,Math.PI/2,Math.PI/2), btmMat));
+  const belt=mk(new THREE.TorusGeometry(r,0.026,8,60),ballBeltMat); belt.rotation.x=Math.PI/2; g.add(belt);
+  const ring=mk(new THREE.TorusGeometry(0.07,0.022,8,40),mat(0x111111)); ring.rotation.x=Math.PI/2; ring.position.z=r*0.91; g.add(ring);
+  const btn=mk(sphere(0.055,16),mat(0xffffff,130)); btn.position.z=r*0.91; g.add(btn);
+  const glow=new THREE.PointLight(0xff4444,0,1.5); g.add(glow); g.userData.glow=glow;
+  return g;
+}
+function setBallType(type) {
+  const c=BALL_CFG[type];
+  ballTopMat.color.setHex(c.top); ballBeltMat.color.setHex(c.belt);
+  ballPill.textContent=c.label; ballPill.className='pill '+c.cls;
+}
+
+/* ── POKEMON BUILDERS ────────────────────────────────────────────────── */
+function buildPikachu() {
+  const g=new THREE.Group();
+  const yel=mat(0xFFD700,38),blk=mat(0x111111),red=mat(0xFF3333),wht=mat(0xffffff),brn=mat(0x7B3F00);
+  const body=mk(sphere(0.22),yel.clone()); body.scale.set(1,1.15,0.9); body.position.y=-0.1; g.add(body);
+  const head=mk(sphere(0.23),yel.clone()); head.position.y=0.3; head.scale.set(1,0.95,0.95); g.add(head);
+  [-1,1].forEach(s=>{
+    const eg=new THREE.Group();
+    eg.add(mk(cone(0.07,0.32,8),yel.clone()));
+    const tip=mk(cone(0.07,0.12,8),blk.clone()); tip.position.y=0.22; eg.add(tip);
+    eg.position.set(s*0.18,0.57,0); eg.rotation.z=s*-0.18; g.add(eg);
+    const c=mk(sphere(0.065,12),red.clone()); c.position.set(s*0.16,0.26,0.19); c.scale.z=0.45; g.add(c);
+    const ew=mk(sphere(0.052,12),wht.clone()); ew.position.set(s*0.095,0.34,0.2); ew.scale.z=0.6; g.add(ew);
+    const ep=mk(sphere(0.028,10),blk.clone()); ep.position.set(s*0.095,0.34,0.235); ep.scale.z=0.5; g.add(ep);
+    const es=mk(sphere(0.012,8),wht.clone()); es.position.set(s*0.083,0.35,0.248); g.add(es);
+    g.add(mk(cyl(0.06,0.055,0.18,10),yel.clone())).position.set(s*0.13,-0.32,0);
+    const ft=mk(sphere(0.07,10),yel.clone()); ft.scale.set(1.2,0.5,1.4); ft.position.set(s*0.13,-0.425,0.04); g.add(ft);
+    const arm=mk(cyl(0.04,0.035,0.2,8),yel.clone()); arm.position.set(s*0.27,-0.04,0); arm.rotation.z=s*(Math.PI/3.5); g.add(arm);
+  });
+  const nose=mk(sphere(0.018,8),brn.clone()); nose.position.set(0,0.295,0.225); nose.scale.z=0.6; g.add(nose);
+  const sm=mk(new THREE.TorusGeometry(0.04,.010,6,12,Math.PI*.9),brn.clone()); sm.position.set(0,0.265,0.225); sm.rotation.z=0.15; sm.rotation.x=0.32; g.add(sm);
+  const tail=new THREE.Group();
+  [[0,0,0,0],[0.1,0.18,0,0.6],[0.22,0.08,0,-0.5]].forEach(d=>{const seg=mk(box(0.08,0.22,0.08),yel.clone()); seg.position.set(d[0],d[1],d[2]); seg.rotation.z=d[3]; tail.add(seg);});
+  tail.position.set(-0.25,-0.08,-0.15); tail.rotation.y=-0.6; g.add(tail);
+  g.position.y=0.1; return g;
+}
+
+function buildCharmander() {
+  const g=new THREE.Group();
+  const orn=mat(0xFF8C42),peach=mat(0xFFCE9E),blk=mat(0x222222),wht=mat(0xffffff);
+  const body=mk(sphere(0.21,20),orn.clone()); body.scale.set(0.95,1.1,0.9); body.position.y=-0.08; g.add(body);
+  const belly=mk(sphere(0.16,16),peach.clone()); belly.scale.set(0.85,0.9,0.4); belly.position.set(0,-0.05,0.17); g.add(belly);
+  const head=mk(sphere(0.2,20),orn.clone()); head.position.y=0.32; g.add(head);
+  [-1,1].forEach(s=>{
+    const ew=mk(sphere(0.045,10),wht.clone()); ew.position.set(s*0.09,0.35,0.17); ew.scale.z=0.6; g.add(ew);
+    const ep=mk(sphere(0.025,8),blk.clone()); ep.position.set(s*0.09,0.35,0.2); ep.scale.z=0.5; g.add(ep);
+    g.add(mk(cyl(0.055,0.05,0.2,10),orn.clone())).position.set(s*0.12,-0.31,0);
+    const ft=mk(sphere(0.065,10),orn.clone()); ft.scale.set(1.1,0.45,1.35); ft.position.set(s*0.12,-0.43,0.03); g.add(ft);
+    const arm=mk(cyl(0.04,0.035,0.2,8),orn.clone()); arm.position.set(s*0.26,-0.02,0); arm.rotation.z=s*(Math.PI/3); g.add(arm);
+  });
+  const tail=mk(cyl(0.04,0.07,0.35,8),orn.clone()); tail.position.set(-0.16,-0.22,-0.12); tail.rotation.z=0.5; tail.rotation.x=0.3; g.add(tail);
+  g.add(mk(sphere(0.075,10),mat(0xFF5500,60,0xFF3300,0.7))).position.set(-0.26,-0.05,-0.18);
+  g.add(mk(sphere(0.05,8), mat(0xFFCC00,80,0xFFAA00,0.8))).position.set(-0.29,0.03,-0.19);
+  g.add(mk(sphere(0.03,8), mat(0xffffff,100,0xffffff,1.0))).position.set(-0.3,0.1,-0.19);
+  const fl=new THREE.PointLight(0xFF6600,0.6,1.2); fl.position.set(-0.27,-0.01,-0.18); g.add(fl); g.userData.flameLight=fl;
+  g.position.y=0.1; return g;
+}
+
+function buildBulbasaur() {
+  const g=new THREE.Group();
+  const teal=mat(0x4AB09A),lteal=mat(0x5DC8B0),red=mat(0xCC2222),blk=mat(0x222222),wht=mat(0xffffff),grn=mat(0x3A8A3A),dgrn=mat(0x226622);
+  const body=mk(sphere(0.24,20),teal.clone()); body.scale.set(1.15,1,1); body.position.y=-0.06; g.add(body);
+  const head=mk(sphere(0.22,18),lteal.clone()); head.position.set(0.12,0.3,0.12); g.add(head);
+  [-1,1].forEach(s=>{
+    const ew=mk(sphere(0.055,10),wht.clone()); ew.position.set(s*0.1+0.12,0.34,0.29); ew.scale.z=0.5; g.add(ew);
+    const ep=mk(sphere(0.04,8),red.clone());   ep.position.set(s*0.1+0.12,0.34,0.31); ep.scale.z=0.5; g.add(ep);
+    g.add(mk(cyl(0.07,0.06,0.15,10),teal.clone())).position.set(s*0.17,-0.32,s*0.06);
+    const ft=mk(sphere(0.075,10),teal.clone()); ft.scale.set(1.3,0.45,1.5); ft.position.set(s*0.18,-0.41,s*0.07); g.add(ft);
+    const sp=mk(sphere(0.05,8),dgrn.clone()); sp.scale.set(1,0.3,1); sp.position.set(s*0.2,-0.02,0.16); g.add(sp);
+  });
+  const bulb=mk(sphere(0.22,16),grn.clone()); bulb.scale.set(1,1.1,0.9); bulb.position.set(-0.05,0.2,-0.18); g.add(bulb);
+  [-1,1].forEach(s=>{ const lf=mk(sphere(0.14,10),dgrn.clone()); lf.scale.set(0.5,1.4,0.15); lf.position.set(s*0.1-0.05,0.42,-0.18); lf.rotation.z=s*0.5; g.add(lf); });
+  g.position.y=0.08; return g;
+}
+
+function buildSquirtle() {
+  const g=new THREE.Group();
+  const blu=mat(0x4A90D4),ltblu=mat(0x7BB8E8),brn=mat(0x8B6914),teal=mat(0x2E7D5A),blk=mat(0x222222),wht=mat(0xffffff),red=mat(0xCC2222);
+  const body=mk(sphere(0.22,18),blu.clone()); body.scale.set(1,1.05,0.9); body.position.y=-0.08; g.add(body);
+  const shell=mk(sphere(0.2,16),teal.clone()); shell.scale.set(0.95,1,0.3); shell.position.set(0,-0.04,-0.19); g.add(shell);
+  const shellRim=mk(new THREE.TorusGeometry(0.18,0.04,6,20),brn.clone()); shellRim.rotation.x=Math.PI/2; shellRim.position.set(0,-0.04,-0.16); g.add(shellRim);
+  const head=mk(sphere(0.2,18),ltblu.clone()); head.position.set(0,0.31,0.08); g.add(head);
+  [-1,1].forEach(s=>{
+    const ew=mk(sphere(0.05,10),wht.clone()); ew.position.set(s*0.09,0.35,0.26); ew.scale.z=0.55; g.add(ew);
+    const ep=mk(sphere(0.03,8),red.clone());  ep.position.set(s*0.09,0.35,0.28); ep.scale.z=0.5; g.add(ep);
+    const ea=mk(sphere(0.035,8),ltblu.clone()); ea.scale.set(1,1.5,0.6); ea.position.set(s*0.18,0.51,0.04); g.add(ea);
+    g.add(mk(cyl(0.06,0.055,0.17,10),blu.clone())).position.set(s*0.14,-0.3,0.04);
+    const ft=mk(sphere(0.07,10),blu.clone()); ft.scale.set(1.2,0.45,1.4); ft.position.set(s*0.14,-0.4,0.06); g.add(ft);
+    const arm=mk(cyl(0.04,0.035,0.18,8),blu.clone()); arm.position.set(s*0.26,-0.04,0.04); arm.rotation.z=s*(Math.PI/3.2); g.add(arm);
+  });
+  const t1=mk(cyl(0.035,0.05,0.2,8),brn.clone()); t1.position.set(-0.16,-0.12,-0.15); t1.rotation.z=0.6; g.add(t1);
+  const t2=mk(sphere(0.055,8),brn.clone()); t2.position.set(-0.25,0,-0.14); g.add(t2);
+  g.position.y=0.1; return g;
+}
+
+function buildEevee() {
+  const g=new THREE.Group();
+  const brn=mat(0x8B5E3C),cre=mat(0xF5E6CC),dbrn=mat(0x5C3A1E),blk=mat(0x222222);
+  const body=mk(sphere(0.2,18),brn.clone()); body.scale.set(1,1.05,0.9); body.position.y=-0.1; g.add(body);
+  const mane=mk(sphere(0.24,18),cre.clone()); mane.scale.set(1.1,0.85,0.7); mane.position.set(0,0.12,0.1); g.add(mane);
+  const head=mk(sphere(0.19,18),brn.clone()); head.position.set(0,0.31,0.08); g.add(head);
+  [-1,1].forEach(s=>{
+    const ear=mk(cone(0.06,0.22,8),brn.clone()); ear.position.set(s*0.14,0.52,0); ear.rotation.z=s*-0.2; g.add(ear);
+    const earI=mk(cone(0.04,0.17,8),dbrn.clone()); earI.position.set(s*0.14,0.52,0.01); earI.rotation.z=s*-0.2; g.add(earI);
+    const ew=mk(sphere(0.048,10),mat(0xffffff)); ew.position.set(s*0.09,0.34,0.17); ew.scale.z=0.55; g.add(ew);
+    const ep=mk(sphere(0.032,8),blk.clone()); ep.position.set(s*0.09,0.34,0.2); ep.scale.z=0.5; g.add(ep);
+    g.add(mk(cyl(0.055,0.05,0.18,10),brn.clone())).position.set(s*0.12,-0.32,0);
+    const ft=mk(sphere(0.065,10),brn.clone()); ft.scale.set(1.15,0.45,1.35); ft.position.set(s*0.12,-0.42,0.03); g.add(ft);
+  });
+  const nose=mk(sphere(0.018,8),blk.clone()); nose.position.set(0,0.295,0.19); nose.scale.z=0.5; g.add(nose);
+  [[-0.18,-0.15,-0.18,0.13,1.3],[-0.26,-0.08,-0.2,0.1,1.2],[-0.33,-0.03,-0.18,0.08,1]].forEach(p=>{
+    const t=mk(sphere(p[3],12),cre.clone()); t.scale.set(1,p[4],0.7); t.position.set(p[0],p[1],p[2]); g.add(t);
+  });
+  g.position.y=0.1; return g;
+}
+
+function buildGengar() {
+  const g=new THREE.Group();
+  const pur=mat(0x7B2FBE),dpur=mat(0x4A1080),red=mat(0xFF1111),wht=mat(0xffffff),blk=mat(0x111111);
+  const body=mk(sphere(0.28,22),pur.clone()); body.scale.set(1,1.1,0.9); body.position.y=-0.04; g.add(body);
+  for(let a=0;a<8;a++){const ang=(a/8)*Math.PI*2; const sp=mk(cone(0.04,0.1,6),dpur.clone()); sp.position.set(Math.cos(ang)*0.27,Math.sin(ang)*0.22-0.04,0); sp.rotation.z=ang+Math.PI/2; g.add(sp);}
+  const head=mk(sphere(0.26,22),pur.clone()); head.position.y=0.28; g.add(head);
+  [-1,1].forEach(s=>{
+    const ew=mk(sphere(0.07,12),red.clone());  ew.position.set(s*0.12,0.33,0.22); ew.scale.z=0.6; g.add(ew);
+    const ep=mk(sphere(0.04,10),blk.clone());  ep.position.set(s*0.12,0.33,0.25); ep.scale.z=0.5; g.add(ep);
+    const eg=mk(sphere(0.02,8), wht.clone());  eg.position.set(s*0.105,0.34,0.265); g.add(eg);
+    const ear=mk(cone(0.06,0.14,6),dpur.clone()); ear.position.set(s*0.22,0.52,0); ear.rotation.z=s*-0.3; g.add(ear);
+    const arm=mk(sphere(0.08,10),pur.clone()); arm.scale.setScalar(0.6); arm.position.set(s*0.33,-0.08,0.1); g.add(arm);
+  });
+  const grin=mk(new THREE.TorusGeometry(0.1,0.018,6,14,Math.PI),blk.clone()); grin.position.set(0,0.2,0.24); grin.rotation.x=0.3; grin.rotation.z=Math.PI; g.add(grin);
+  [-1,0,1].forEach(x=>{ const t=mk(box(0.028,0.04,0.01),wht.clone()); t.position.set(x*0.06,0.175,0.252); g.add(t); });
+  const eyeGlow=new THREE.PointLight(0xFF2222,0.4,0.8); eyeGlow.position.set(0,0.33,0.22); g.add(eyeGlow); g.userData.eyeGlow=eyeGlow;
+  g.position.y=0.04; return g;
+}
+
+function buildMewtwo() {
+  const g=new THREE.Group();
+  const grey=mat(0xBBBBCC),lgrEy=mat(0xD0D0E0),pur=mat(0x9B59B6),blk=mat(0x222222),wht=mat(0xffffff),dgrEy=mat(0x888899);
+  const torso=mk(sphere(0.21,18),grey.clone()); torso.scale.set(0.85,1.3,0.75); torso.position.y=-0.05; g.add(torso);
+  const chest=mk(sphere(0.16,14),lgrEy.clone()); chest.scale.set(0.75,0.9,0.4); chest.position.set(0,0,0.16); g.add(chest);
+  const head=mk(sphere(0.24,20),grey.clone()); head.position.y=0.37; g.add(head);
+  const ridge=mk(sphere(0.14,12),pur.clone()); ridge.scale.set(0.4,1.3,0.6); ridge.position.set(0,0.48,-0.1); g.add(ridge);
+  [-1,1].forEach(s=>{
+    const ew=mk(sphere(0.06,10),wht.clone()); ew.position.set(s*0.12,0.4,0.22); ew.scale.z=0.55; g.add(ew);
+    const ep=mk(sphere(0.04,8),pur.clone());  ep.position.set(s*0.12,0.4,0.24); ep.scale.z=0.5; g.add(ep);
+    const sp=mk(cone(0.04,0.12,6),grey.clone()); sp.position.set(s*0.22,0.59,0); sp.rotation.z=s*-0.35; g.add(sp);
+    const arm=mk(cyl(0.04,0.035,0.28,8),dgrEy.clone()); arm.position.set(s*0.3,0.02,0); arm.rotation.z=s*(Math.PI/3.5); g.add(arm);
+    const hand=mk(sphere(0.055,8),grey.clone()); hand.position.set(s*0.42,-0.11,0); g.add(hand);
+    g.add(mk(cyl(0.055,0.05,0.28,10),dgrEy.clone())).position.set(s*0.12,-0.38,0);
+    const ft=mk(sphere(0.065,10),grey.clone()); ft.scale.set(1.1,0.45,1.2); ft.position.set(s*0.12,-0.54,0.04); g.add(ft);
+  });
+  const tBase=mk(cyl(0.04,0.06,0.4,8),pur.clone()); tBase.position.set(0,-0.15,-0.2); tBase.rotation.x=0.5; g.add(tBase);
+  g.add(mk(sphere(0.065,10),pur.clone())).position.set(0,0.06,-0.38);
+  g.add(mk(sphere(0.05,10),pur.clone())).position.set(0,0.18,-0.43);
+  const aura=new THREE.PointLight(0xCC44FF,0.5,1.5); aura.position.set(0,0.37,0.22); g.add(aura); g.userData.aura=aura;
+  g.scale.setScalar(0.88); g.position.y=0.14; return g;
+}
+
+function buildSnorlax() {
+  const g=new THREE.Group();
+  const dbl=mat(0x3B5BA5),cre=mat(0xF5E0A5),blk=mat(0x222222),wht=mat(0xffffff);
+  const body=mk(sphere(0.32,20),dbl.clone()); body.scale.set(1,1.15,1); body.position.y=-0.02; g.add(body);
+  const belly=mk(sphere(0.26,16),cre.clone()); belly.scale.set(0.9,0.85,0.4); belly.position.set(0,0,0.28); g.add(belly);
+  const head=mk(sphere(0.26,18),dbl.clone()); head.position.y=0.42; head.scale.set(1,0.9,0.9); g.add(head);
+  [-1,1].forEach(s=>{
+    const ew=mk(sphere(0.05,10),wht.clone()); ew.position.set(s*0.12,0.48,0.23); ew.scale.z=0.5; g.add(ew);
+    const ep=mk(sphere(0.035,8),blk.clone()); ep.position.set(s*0.12,0.48,0.25); ep.scale.z=0.5; g.add(ep);
+    const ear=mk(sphere(0.065,8),dbl.clone()); ear.position.set(s*0.25,0.62,0); g.add(ear);
+    const arm=mk(sphere(0.11,12),dbl.clone()); arm.scale.set(1,0.7,0.8); arm.position.set(s*0.4,0.05,0.1); g.add(arm);
+    const leg=mk(sphere(0.1,12),dbl.clone());  leg.scale.set(1.1,0.6,0.9); leg.position.set(s*0.2,-0.37,0.08); g.add(leg);
+  });
+  const nose=mk(sphere(0.02,8),blk.clone()); nose.position.set(0,0.43,0.26); g.add(nose);
+  g.position.y=0; return g;
+}
+
+/* ── POKEMON REGISTRY ────────────────────────────────────────────────── */
+const TYPE_COL = { Electric:'#FFD700',Fire:'#FF6B35',Water:'#4FC3F7',Grass:'#66BB6A',Ghost:'#CE93D8',Psychic:'#F48FB1',Normal:'#BDBDBD' };
+const TYPE_BG  = { Electric:'rgba(80,64,0,.85)',Fire:'rgba(80,30,0,.85)',Water:'rgba(0,35,80,.85)',Grass:'rgba(10,55,10,.85)',Ghost:'rgba(50,0,80,.85)',Psychic:'rgba(80,0,40,.85)',Normal:'rgba(50,50,50,.85)' };
+const RARITY_COL = { Common:'rgba(255,255,255,.45)', Rare:'#CE93D8', Legendary:'#FFD700' };
+
+const POKEMON = [
+  { name:'Pikachu',    type:'Electric', rarity:'Common',    cp:[120,280],  w:20, build:buildPikachu    },
+  { name:'Charmander', type:'Fire',     rarity:'Common',    cp:[100,240],  w:20, build:buildCharmander },
+  { name:'Bulbasaur',  type:'Grass',    rarity:'Common',    cp:[100,230],  w:20, build:buildBulbasaur  },
+  { name:'Squirtle',   type:'Water',    rarity:'Common',    cp:[110,250],  w:18, build:buildSquirtle   },
+  { name:'Eevee',      type:'Normal',   rarity:'Common',    cp:[130,260],  w:14, build:buildEevee      },
+  { name:'Snorlax',    type:'Normal',   rarity:'Common',    cp:[200,360],  w: 8, build:buildSnorlax    },
+  { name:'Gengar',     type:'Ghost',    rarity:'Rare',      cp:[320,560],  w: 8, build:buildGengar     },
+  { name:'Mewtwo',     type:'Psychic',  rarity:'Legendary', cp:[850,1200], w: 2, build:buildMewtwo     },
+];
+const TOTAL_W = POKEMON.reduce((s,p)=>s+p.w,0);
+function selectPokemon() { let r=Math.random()*TOTAL_W; for(const p of POKEMON){r-=p.w;if(r<=0)return p;} return POKEMON[0]; }
+
+function applyShiny(grp) {
+  grp.traverse(ch => {
+    if (ch.isMesh && ch.material && ch.material.color) {
+      ch.material=ch.material.clone();
+      const c=ch.material.color;
+      ch.material.color.setRGB(Math.min(c.r*.6+0.5,1),Math.min(c.g*.6+0.45,1),Math.min(c.b*.15,0.2));
+      ch.material.shininess=130; ch.material.emissive=new THREE.Color(0x443300); ch.material.emissiveIntensity=0.3;
+    }
+  });
+}
+
+/* ── SCENE OBJECTS ───────────────────────────────────────────────────── */
+const pokeball = buildPokeball();
+scene.add(pokeball);
+let curPkGroup=null, curPkData=null, curCP=0, curShiny=false, pkBob=0;
+
+function removePokemon() { if(curPkGroup){scene.remove(curPkGroup);curPkGroup=null;} }
+
+/*
+ * spawnPokemon(landPos)
+ * landPos = where the pokéball physically hit (Vector3).
+ * Clamps to visible area so Pokémon always appears on screen.
+ */
+function spawnPokemon(landPos) {
+  removePokemon();
+  const data   = selectPokemon();
+  const isShiny = Math.random() < 0.02;
+  const grp    = data.build();
+  if (isShiny) applyShiny(grp);
+
+  // Clamp to visible area — ball may land off-screen, Pokémon must not
+  const sx = M.clamp(landPos.x, -1.8, 1.8);
+  const sy = Math.max(landPos.y, 0.1);   // at least slightly above "ground"
+  const sz = M.clamp(landPos.z, -1.2, 0.8);
+
+  grp.position.set(sx, sy, sz);
+  grp.userData.spawnY = sy;
+  grp.scale.setScalar(0.01);
+  scene.add(grp);
+
+  curPkGroup = grp; curPkData = data;
+  curCP = data.cp[0] + Math.floor(Math.random()*(data.cp[1]-data.cp[0]));
+  curShiny = isShiny; pkBob = 0;
+
+  updateInfoCard(data, isShiny, curCP);
+  spawnParticles(grp.position.clone(), data.rarity, isShiny);
+  doFlash(data.rarity);
+}
+
+/* ── INPUT ABSTRACTION ───────────────────────────────────────────────── */
+const inp = { active:false, nx:0.5, ny:0.5, holding:false };
+let handMode=false, latestLM=null, latestLM2=null, mouseEnabled=false;
+let powerCharge=0, powerTimer=0;
+
+function enableMouseFallback() {
+  if (mouseEnabled) return; mouseEnabled=true;
+  window.addEventListener('mousemove', e=>{
+    if(handMode)return; inp.active=true; inp.nx=e.clientX/window.innerWidth; inp.ny=e.clientY/window.innerHeight;
+    cursorRing.style.left=e.clientX+'px'; cursorRing.style.top=e.clientY+'px';
+  });
+  window.addEventListener('mousedown', e=>{ if(handMode||e.button!==0)return; inp.holding=true; cursorRing.classList.add('hold'); });
+  window.addEventListener('mouseup',   e=>{ if(handMode||e.button!==0)return; inp.holding=false; cursorRing.classList.remove('hold'); });
+  window.addEventListener('touchstart',e=>{
+    if(handMode)return; const t=e.touches[0]; inp.active=true;
+    inp.nx=t.clientX/window.innerWidth; inp.ny=t.clientY/window.innerHeight; inp.holding=true;
+    cursorRing.style.left=t.clientX+'px'; cursorRing.style.top=t.clientY+'px'; cursorRing.classList.add('hold'); e.preventDefault();
+  },{passive:false});
+  window.addEventListener('touchmove',e=>{
+    if(handMode)return; const t=e.touches[0];
+    inp.nx=t.clientX/window.innerWidth; inp.ny=t.clientY/window.innerHeight;
+    cursorRing.style.left=t.clientX+'px'; cursorRing.style.top=t.clientY+'px'; e.preventDefault();
+  },{passive:false});
+  window.addEventListener('touchend',()=>{ if(handMode)return; inp.holding=false; cursorRing.classList.remove('hold'); });
+  cursorRing.style.display='block';
+}
+
+const PINCH_ON=0.07, PINCH_OFF=0.14;
+let wasPinch=false;
+function updateInpFromLM(lm) {
+  inp.active=true; inp.nx=1-lm[9].x; inp.ny=lm[9].y;
+  const d=Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y);
+  if(!wasPinch&&d<PINCH_ON) wasPinch=true;
+  if( wasPinch&&d>PINCH_OFF) wasPinch=false;
+  inp.holding=wasPinch;
+}
+
+/* ── COORDINATE MAPPING ──────────────────────────────────────────────── */
+function ndcToWorld(nx,ny,depth) {
+  const v=new THREE.Vector3(nx*2-1,-(ny*2-1),0.5).unproject(camera);
+  const dir=v.sub(camera.position).normalize();
+  if(Math.abs(dir.z)<0.001) return new THREE.Vector3(0,0,0);
+  return camera.position.clone().addScaledVector(dir,-depth/dir.z);
+}
+function worldToScreen(wp) {
+  const v=wp.clone().project(camera);
+  return {x:Math.round((v.x+1)*window.innerWidth/2),y:Math.round((-v.y+1)*window.innerHeight/2)};
+}
+
+/* ── STATE MACHINE ───────────────────────────────────────────────────── */
+const ST={IDLE:'IDLE',HOLD:'HOLD',THROWN:'THROWN',SPAWN:'SPAWN'};
+let state=ST.IDLE;
+
+const HIST=6; const posHist=[];
+function pushHist(p){posHist.push(p.clone()); if(posHist.length>HIST)posHist.shift();}
+
+function computeVel() {
+  const powerMult = 1.0 + powerCharge * 2.2; // 1× to 3.2× based on power charge
+  if(posHist.length<2){
+    const v=new THREE.Vector3(0,0.3,-4.5); v.multiplyScalar(powerMult); return v;
+  }
+  let vx=0,vy=0,vz=0,tw=0;
+  for(let i=1;i<posHist.length;i++){const w=i,d=posHist[i].clone().sub(posHist[i-1]); vx+=d.x*w;vy+=d.y*w;vz+=d.z*w;tw+=w;}
+  const v=new THREE.Vector3(vx/tw,vy/tw,vz/tw).multiplyScalar(50*powerMult);
+  // Always ensure a meaningful forward throw — clamp Z to always be negative
+  v.z  = M.clamp(v.z, -6.0, -2.0);
+  v.x  = M.clamp(v.x, -4.0, 4.0);
+  v.y  = M.clamp(v.y, -2.0, 5.0);
+  return v;
+}
+
+let throwVel=new THREE.Vector3();
+// Stronger gravity + shorter TTL = ball arcs naturally and lands quickly in front
+const GRAVITY   = new THREE.Vector3(0,-9.0,0);
+const THROW_TTL = 0.9;
+let throwTime=0;
+
+let totalCaught=0; const pokedex={};
+
+/* ── PARTICLES ───────────────────────────────────────────────────────── */
+const parts=[];
+const PCOLORS={Common:[0xFF3333,0xFFD700,0xFFFFFF,0x44FF44,0x4488FF,0xFF88FF],Rare:[0xAA44FF,0x6644FF,0xFF44CC,0x4444FF,0xCC44FF,0xffffff],Legendary:[0xFFD700,0xFFA500,0xFFFFFF,0xFFEE00,0xFF8C00,0xffffff],Shiny:[0xFFD700,0xFFEE88,0xFFFFCC,0xFFCC00,0xffffff,0xFFD700]};
+function spawnParticles(origin,rarity,isShiny) {
+  parts.forEach(p=>scene.remove(p.m)); parts.length=0;
+  const cols=isShiny?PCOLORS.Shiny:(PCOLORS[rarity]||PCOLORS.Common);
+  const count=rarity==='Legendary'?60:rarity==='Rare'?42:28;
+  const spd  =rarity==='Legendary'?8:rarity==='Rare'?6:4.5;
+  for(let i=0;i<count;i++){
+    const sz=0.035+Math.random()*0.09;
+    const m=mk(box(sz,sz,sz),new THREE.MeshPhongMaterial({color:cols[i%cols.length],emissive:cols[i%cols.length],emissiveIntensity:.55,transparent:true}));
+    m.position.copy(origin); scene.add(m);
+    parts.push({m,life:1,v:new THREE.Vector3((Math.random()-.5)*spd,(Math.random()-.5)*spd,(Math.random()-.5)*spd)});
+  }
+}
+function tickParts(dt) {
+  for(let i=parts.length-1;i>=0;i--){
+    const p=parts[i]; p.life-=dt*1.4;
+    if(p.life<=0){scene.remove(p.m);parts.splice(i,1);continue;}
+    p.v.y-=5*dt; p.m.position.addScaledVector(p.v,dt);
+    p.m.rotation.x+=dt*4; p.m.rotation.y+=dt*3; p.m.material.opacity=p.life;
+  }
+}
+
+function doFlash(rarity) {
+  const c={Common:'rgba(255,255,255,.18)',Rare:'rgba(100,70,220,.45)',Legendary:'rgba(255,200,0,.62)'};
+  flashEl.style.background=c[rarity]||c.Common; flashEl.style.opacity='1';
+  setTimeout(()=>{flashEl.style.opacity='0';},rarity==='Legendary'?200:100);
+}
+
+/* ── STATE TRANSITIONS ───────────────────────────────────────────────── */
+function setState(s) {
+  state=s; badge.className='';
+  powerCharge=0; powerTimer=0; powerBar.style.width='0%'; powerWrap.classList.remove('active');
+
+  switch(s) {
+    case ST.IDLE:
+      badge.textContent='Ball follows your hand — pinch to grip it';
+      pokeball.visible=true; pokeball.position.set(0,0,0);
+      posHist.length=0; inp.holding=false; wasPinch=false;
+      releaseFrames=0;              // reset debounce on full state reset
+      if(pokeball.userData.glow) pokeball.userData.glow.intensity=0;
+      hud.classList.remove('info-up');
+      infoCard.classList.remove('show');
+      pokeLabel.style.display='none';
+      twohandHint.classList.remove('show');
+      break;
+    case ST.HOLD:
+      badge.textContent='Holding — open hand to throw';
+      badge.classList.add('hold');
+      if(pokeball.userData.glow) pokeball.userData.glow.intensity=0.45;
+      break;
+    case ST.THROWN:
+      badge.textContent='Ball away!';
+      badge.classList.add('thrown');
+      if(pokeball.userData.glow) pokeball.userData.glow.intensity=0.9;
+      break;
+    case ST.SPAWN: {
+      const sp = pokeball.position.clone(); // capture landing position
+      pokeball.visible=false;
+      if(pokeball.userData.glow) pokeball.userData.glow.intensity=0;
+      spawnPokemon(sp);  // spawn at ball's actual landing spot
+      const nm=curPkData?curPkData.name:'Pokémon';
+      badge.textContent=nm+' appeared!'; badge.classList.add('caught');
+      hud.classList.add('info-up');
+      infoCard.classList.add('show');
+      totalCaught++;
+      catchNumEl.textContent=totalCaught;
+      if(curPkData){
+        pokedex[curPkData.name]=(pokedex[curPkData.name]||0)+1;
+        renderDex();
+      }
+      updateBallForCount(totalCaught);
+      // 10-second display window; countdown badge in the last 3 seconds
+      let countdown = 10;
+      const countInterval = setInterval(()=>{
+        countdown--;
+        if(countdown<=3 && state===ST.SPAWN && !inspecting){
+          badge.textContent='Next ball in '+countdown+'…';
+          badge.className='';
+        }
+        if(countdown<=0) clearInterval(countInterval);
+      }, 1000);
+      setTimeout(()=>{
+        clearInterval(countInterval);
+        removePokemon(); pokeball.visible=true; pokeball.position.set(0,0,0);
+        posHist.length=0; setState(ST.IDLE);
+      }, 10000);
+      break;
+    }
+  }
+}
+
+function updateBallForCount(n) {
+  if(n>=7) setBallType('ultraball');
+  else if(n>=3) setBallType('greatball');
+  else setBallType('pokeball');
+}
+
+/* ── INPUT PROCESSING ────────────────────────────────────────────────── */
+let gameActive=false;
+
+/*
+ * releaseFrames: require N consecutive open-hand frames before confirming
+ * a throw. Prevents a single MediaPipe glitch frame from firing the throw
+ * while the user is trying to power-charge with a second hand.
+ */
+let releaseFrames=0;
+const RELEASE_NEED=5; // frames ≈ 0.17 s at 30 fps — imperceptible to user
+
+function processInput() {
+  if(state===ST.THROWN||state===ST.SPAWN) return;
+  if(!inp.active){releaseFrames=0;if(state===ST.HOLD)setState(ST.IDLE);return;}
+  const pw=ndcToWorld(inp.nx,inp.ny,2.2);
+  if(inp.holding){
+    releaseFrames=0;               // reset debounce whenever hand is closed
+    if(state!==ST.HOLD)setState(ST.HOLD);
+    pokeball.position.lerp(pw,.38); pushHist(pokeball.position);
+  } else {
+    if(state===ST.HOLD){
+      releaseFrames++;
+      pushHist(pokeball.position); // keep history fresh during debounce
+      if(releaseFrames>=RELEASE_NEED){
+        releaseFrames=0;
+        throwVel=computeVel(); throwTime=0; setState(ST.THROWN);
+      }
+      // Keep ball following hand during debounce so history is accurate
+      pokeball.position.lerp(pw,.38);
+    } else {
+      releaseFrames=0;
+      pokeball.position.lerp(pw,.13); pushHist(pokeball.position);
+    }
+  }
+}
+
+/* ── TWO-HAND INTERACTIONS ───────────────────────────────────────────── */
+/*
+ * SPAWN state + 2 hands  →  INSPECTION MODE
+ *   • Distance between palms controls Pokémon scale (min 0.4, max 2.5)
+ *   • Tilt angle of the hand-to-hand vector rotates Pokémon on Y axis
+ *
+ * HOLD state + 2nd hand detected → POWER CHARGE
+ *   • A power bar fills over 2.5 seconds while holding with 2 hands
+ *   • On throw, velocity is multiplied by (1 + charge * 2.2), up to 3.2×
+ */
+let pkBaseScale = 1.0; // Pokémon's natural scale when inspection starts
+let inspecting  = false;
+
+function processTwoHands(lm0, lm1, dt) {
+  // Palm positions in normalised screen space
+  const x0=1-lm0[9].x, y0=lm0[9].y;
+  const x1=1-lm1[9].x, y1=lm1[9].y;
+  // Distance between the two palms — drives scale in inspection mode
+  const handDist = Math.hypot(x1-x0, y1-y0);
+
+  if (state===ST.SPAWN && curPkGroup) {
+    // ─── INSPECTION MODE ────────────────────────────────────────────────
+    if (!inspecting) {
+      inspecting = true;
+      pkBaseScale = curPkGroup.scale.x;
+      twohandHint.textContent = 'Spread hands apart to grow · Move ball-hand left or right to rotate';
+      twohandHint.classList.add('show');
+    }
+    badge.textContent = 'Inspection Mode — both hands active';
+    badge.className = 'caught';
+
+    // Scale: hand separation. 0.10 → 0.4×, 0.75 → 2.5×
+    const targetScale = 0.4 + (handDist - 0.10) / (0.75 - 0.10) * 2.1;
+    curPkGroup.scale.setScalar(M.lerp(curPkGroup.scale.x, M.clamp(targetScale, 0.4, 2.5), 0.12));
+
+    // Rotation: primary-hand LEFT‑RIGHT screen position drives Y-rotation.
+    // inp.nx is already updated from the primary landmark before this call.
+    // Moving your hand right → see the right side of the Pokémon (positive Y).
+    //   inp.nx = 0 (hand far right on screen) → +π rotation
+    //   inp.nx = 0.5 (centre)                →   0
+    //   inp.nx = 1 (hand far left on screen)  → -π rotation
+    const targetRotY = -(inp.nx - 0.5) * Math.PI * 3.5;
+    curPkGroup.rotation.y = M.lerp(curPkGroup.rotation.y, targetRotY, 0.10);
+
+  } else if (state===ST.HOLD) {
+    // ─── POWER CHARGE ───────────────────────────────────────────────────
+    powerTimer  = Math.min(powerTimer + dt, 2.5);
+    powerCharge = powerTimer / 2.5;
+    powerBar.style.width = (powerCharge * 100) + '%';
+    powerWrap.classList.add('active');
+
+    const pct = Math.round(powerCharge * 100);
+    if (pct < 100) {
+      badge.textContent = 'Charging — ' + pct + '% power';
+      badge.className   = 'hold';
+    } else {
+      badge.textContent = 'MAX POWER — open hand to throw!';
+      badge.className   = 'thrown';
+    }
+
+    // Only update hint on first frame of charging
+    if (!twohandHint.classList.contains('show')) {
+      twohandHint.textContent = 'Keep pinching · Power charging · Open hand to throw';
+      twohandHint.classList.add('show');
+    }
+  }
+}
+
+/* ── ANIMATION LOOP ──────────────────────────────────────────────────── */
+const clock=new THREE.Clock(true);
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),0.05);
+
+  // Ball idle spin
+  if(state===ST.IDLE||state===ST.HOLD) pokeball.rotation.y+=dt*0.85;
+
+  if(gameActive) {
+    // Primary hand → inp
+    if(handMode){
+      if(latestLM) updateInpFromLM(latestLM);
+      else{inp.active=false;inp.holding=false;if(state===ST.HOLD)setState(ST.IDLE);}
+    }
+    // Two-hand features
+    if(handMode && latestLM && latestLM2){
+      processTwoHands(latestLM, latestLM2, dt);
+    } else {
+      // Second hand lost — reset inspection / power states
+      inspecting=false;
+      twohandHint.classList.remove('show');
+      if(state===ST.HOLD){
+        powerTimer=0; powerCharge=0;
+        powerBar.style.width='0%'; powerWrap.classList.remove('active');
+        // Restore the correct badge text when charge is interrupted
+        badge.textContent='Holding — open hand to throw';
+        badge.className='hold';
+      }
+      if(state===ST.SPAWN && curPkGroup){
+        // Restore spawn badge when leaving inspection
+        badge.textContent=(curPkData?curPkData.name:'Pokémon')+' appeared!';
+        badge.className='caught';
+      }
+    }
+    processInput();
+  }
+
+  // Throw physics
+  if(state===ST.THROWN) {
+    throwTime+=dt;
+    pokeball.position.addScaledVector(throwVel,dt);
+    throwVel.addScaledVector(GRAVITY,dt);
+    pokeball.rotation.x+=dt*6; pokeball.rotation.z+=dt*2;
+    const g=pokeball.userData.glow;
+    if(g) g.intensity=0.6+0.4*Math.sin(throwTime*22);
+    // Trigger spawn when: time exceeded, ball goes behind scene, OR ball drops below floor
+    if(throwTime>=THROW_TTL || pokeball.position.z<-2.5 || pokeball.position.y<-1.4){
+      setState(ST.SPAWN);
+    }
+  }
+
+  // Spawn animation
+  if(state===ST.SPAWN){
+    tickParts(dt);
+    if(curPkGroup && curPkGroup.visible){
+      pkBob+=dt;
+      // Only auto-rotate if NOT being inspected with two hands
+      if(!inspecting) curPkGroup.rotation.y+=dt*0.65;
+      curPkGroup.position.y=(curPkGroup.userData.spawnY||0)+Math.sin(pkBob*2)*0.04;
+      if(curPkGroup.scale.x<0.995 && !inspecting)
+        curPkGroup.scale.setScalar(M.lerp(curPkGroup.scale.x,1,dt*7));
+      // Animate special lights
+      if(curPkGroup.userData.flameLight) curPkGroup.userData.flameLight.intensity=0.5+0.3*Math.sin(pkBob*12);
+      if(curPkGroup.userData.eyeGlow)   curPkGroup.userData.eyeGlow.intensity=0.3+0.2*Math.sin(pkBob*8);
+      if(curPkGroup.userData.aura)      curPkGroup.userData.aura.intensity=0.4+0.3*Math.sin(pkBob*6);
+      // Float name label above model
+      const lp=curPkGroup.position.clone().add(new THREE.Vector3(0,1.0,0));
+      const sc=worldToScreen(lp);
+      pokeLabel.style.left=sc.x+'px'; pokeLabel.style.top=sc.y+'px';
+      pokeLabel.style.display='block';
+    }
+  }
+
+  renderer.render(scene,camera);
+}
+animate();
+
+/* ── UI HELPERS ──────────────────────────────────────────────────────── */
+function updateInfoCard(data,isShiny,cp) {
+  pokeNameEl.textContent =data.name;
+  pokeShinyEl.style.display=isShiny?'inline-block':'none';
+  const tc=TYPE_COL[data.type]||'#fff', tbg=TYPE_BG[data.type]||'rgba(50,50,50,.85)';
+  pokeTypeEl.textContent=data.type; pokeTypeEl.style.background=tbg; pokeTypeEl.style.color=tc;
+  pokeRarEl.textContent=data.rarity; pokeRarEl.style.color=RARITY_COL[data.rarity]||'#fff';
+  pokeCpEl.textContent='CP '+cp;
+  pokeLabel.textContent=data.name+(isShiny?' ★':'');
+}
+
+function renderDex() {
+  const entries=Object.entries(pokedex);
+  if(!entries.length) return;
+  dexList.innerHTML='';
+  entries.forEach(([name,count])=>{
+    const pd=POKEMON.find(p=>p.name===name);
+    const dot=pd?TYPE_COL[pd.type]||'#fff':'#fff';
+    const tbg=pd?TYPE_BG[pd.type]||'rgba(50,50,50,.85)':'rgba(50,50,50,.85)';
+    const tc =pd?TYPE_COL[pd.type]||'#fff':'#fff';
+    const row=document.createElement('div'); row.className='dex-item';
+    row.innerHTML=`<div class="dex-dot" style="background:${dot}"></div><div class="dex-name">${name}</div>${pd?`<div class="dex-type" style="background:${tbg};color:${tc}">${pd.type}</div>`:''}<div class="dex-count">×${count}</div>`;
+    dexList.appendChild(row);
+  });
+}
+
+/* ── BUTTON HANDLERS ─────────────────────────────────────────────────── */
+btnAR.addEventListener('click',()=>{
+  btnAR.disabled=true; btnAR.textContent='Starting…';
+  enableMouseFallback();
+  gameActive=true; cardEl.style.display='none'; hud.style.display='block';
+  modePill.textContent='Cursor Fallback'; setState(ST.IDLE);
+
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    addLog('Camera API unavailable — using cursor fallback','err'); return;
+  }
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},audio:false})
+  .then(stream=>{
+    addLog('Camera access granted','ok');
+    videoEl.srcObject=stream; videoEl.style.display='block';
+    videoEl.addEventListener('loadeddata',()=>{
+      addLog('Video active ('+videoEl.videoWidth+'×'+videoEl.videoHeight+')','ok');
+      debugC.width=window.innerWidth; debugC.height=window.innerHeight;
+      tryLoadMediaPipe();
+    },{once:true});
+    videoEl.play().catch(e=>addLog('Video error: '+e.message,'err'));
+  })
+  .catch(e=>addLog('Camera error: '+e.message+' — cursor fallback active','err'));
+});
+
+btnDex.addEventListener('click',()=>dexPanel.classList.add('open'));
+dexClose.addEventListener('click',()=>dexPanel.classList.remove('open'));
+
+/* ── MEDIAPIPE LOADING ───────────────────────────────────────────────── */
+function tryLoadMediaPipe() {
+  addLog('Downloading hand-tracking model…');
+  const timer=setTimeout(()=>{ if(!handMode) addLog('Hand tracking timed out — cursor fallback active','err'); },35000);
+
+  function tryUrl(url,fb) {
+    const s=document.createElement('script'); s.src=url; s.crossOrigin='anonymous';
+    s.onerror=()=>{ if(fb){addLog('Primary CDN failed, trying fallback…'); tryUrl(fb,null);}
+                    else{clearTimeout(timer);addLog('All CDNs failed — cursor fallback active','err');} };
+    s.onload =()=>{
+      if(typeof Hands==='undefined'){clearTimeout(timer);addLog('Hands class missing','err');return;}
+      addLog('Library loaded, initialising model…','ok');
+      initHandPose(timer);
+    };
+    document.head.appendChild(s);
+  }
+  tryUrl(
+    'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js',
+    'https://unpkg.com/@mediapipe/hands@0.4.1646424915/hands.js'
+  );
+}
+
+function initHandPose(timer) {
+  let handsObj;
+  try {
+    handsObj=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/'+f});
+    handsObj.setOptions({
+      maxNumHands:2,                // ← TWO hands
+      modelComplexity:1,
+      minDetectionConfidence:.7,
+      minTrackingConfidence:.6
+    });
+  } catch(e){clearTimeout(timer);addLog('Model init error: '+e.message,'err');return;}
+
+  const dbCtx =debugC.getContext('2d');
+  const safeC =typeof drawConnectors==='function'?drawConnectors:()=>{};
+  const safeL =typeof drawLandmarks ==='function'?drawLandmarks :()=>{};
+  const safeHC=typeof HAND_CONNECTIONS!=='undefined'?HAND_CONNECTIONS:[];
+  let first=false;
+  /*
+   * primaryLabel — locked to the handedness ('Left'|'Right') of the
+   * FIRST solo hand detected.  When a second hand enters the frame,
+   * MediaPipe can flip which landmark array is index 0 vs 1.  By always
+   * finding the landmark set that matches primaryLabel we guarantee the
+   * same hand drives the ball every frame, preventing false throws and
+   * flickering inspection mode.
+   */
+  let primaryLabel=null;
+
+  handsObj.onResults(results=>{
+    if(!first){
+      first=true; clearTimeout(timer); handMode=true;
+      cursorRing.style.display='none';
+      modePill.textContent='Hand Tracking'; modePill.classList.add('active');
+      addLog('Hand tracking online — both hands supported','ok');
+    }
+
+    latestLM=null; latestLM2=null;
+    dbCtx.clearRect(0,0,debugC.width,debugC.height);
+
+    if(!results.multiHandLandmarks || results.multiHandLandmarks.length===0) return;
+
+    // Pair each landmark set with its handedness label
+    const hands = results.multiHandLandmarks.map((lm,i)=>({
+      lm,
+      label: (results.multiHandedness && results.multiHandedness[i])
+             ? results.multiHandedness[i].label
+             : (i===0?'Right':'Left')
+    }));
+
+    if(hands.length===1){
+      // Solo hand — record it as primary if not yet set
+      if(!primaryLabel) primaryLabel=hands[0].label;
+      latestLM=hands[0].lm;
+    } else {
+      // Two hands — assign by label so primary never switches
+      if(!primaryLabel) primaryLabel=hands[0].label;
+      const prim=hands.find(h=>h.label===primaryLabel);
+      const sec =hands.find(h=>h.label!==primaryLabel);
+      latestLM  = prim ? prim.lm : hands[0].lm;
+      latestLM2 = sec  ? sec.lm  : hands[1].lm;
+    }
+
+    if(debugC.classList.contains('on')){
+      try{
+        if(latestLM){ safeC(dbCtx,latestLM, safeHC,{color:'#00FF88',lineWidth:2}); safeL(dbCtx,latestLM, {color:'#FF3366',lineWidth:1,radius:4}); }
+        if(latestLM2){ safeC(dbCtx,latestLM2,safeHC,{color:'#88FFFF',lineWidth:2}); safeL(dbCtx,latestLM2,{color:'#FF88FF',lineWidth:1,radius:4}); }
+      } catch(_){}
+    }
+  });
+
+  let busy=false;
+  (function sendFrame(){
+    requestAnimationFrame(sendFrame);
+    if(!busy&&videoEl.readyState>=2){
+      busy=true;
+      handsObj.send({image:videoEl}).then(()=>busy=false).catch(()=>busy=false);
+    }
+  })();
+}
+
+/* ── DEBUG TOGGLE ─────────────────────────────────────────────────────── */
+window.addEventListener('keydown',e=>{if(e.key==='d'||e.key==='D')debugC.classList.toggle('on');});
+</script>
+</body>
+</html>
